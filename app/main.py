@@ -32,38 +32,46 @@ class ChatMessage(BaseModel):
     message: str
 
 def get_weather(location: str) -> dict:
-    """Fetch weather data from Open-Meteo API"""
-    geocoding_url = f"https://geocoding-api.open-meteo.com/v1/search?name={location}&count=1"
+    """Fetch weather data from OpenWeatherMap API"""
+    api_key = os.getenv("OPENWEATHERMAP_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="OpenWeatherMap API key not set in environment.")
+    # 1. Geocode location to get lat/lon
+    geocode_url = f"http://api.openweathermap.org/geo/1.0/direct"
+    geocode_params = {
+        "q": location,
+        "limit": 1,
+        "appid": api_key
+    }
     try:
-        geo_response = requests.get(geocoding_url)
+        geo_response = requests.get(geocode_url, params=geocode_params, timeout=10)
         geo_response.raise_for_status()
         geo_data = geo_response.json()
-        if not geo_data.get('results'):
+        if not geo_data:
             raise HTTPException(status_code=404, detail=f"Location '{location}' not found")
-        location_data = geo_data['results'][0]
-        latitude = location_data['latitude']
-        longitude = location_data['longitude']
-        weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m"
+        lat = geo_data[0]['lat']
+        lon = geo_data[0]['lon']
+
+        # 2. Get weather for lat/lon
+        weather_url = f"http://api.openweathermap.org/data/2.5/weather"
         weather_params = {
-            "timeout": 10
+            "lat": lat,
+            "lon": lon,
+            "appid": api_key,
+            "units": "metric"
         }
-        weather_response = requests.get(weather_url, params=weather_params)
+        weather_response = requests.get(weather_url, params=weather_params, timeout=10)
         weather_response.raise_for_status()
         weather_data = weather_response.json()
-        weather_codes = {
-            0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast", 45: "Foggy", 48: "Depositing rime fog", 51: "Light drizzle", 53: "Moderate drizzle", 55: "Dense drizzle", 61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain", 71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow", 77: "Snow grains", 80: "Slight rain showers", 81: "Moderate rain showers", 82: "Violent rain showers", 85: "Slight snow showers", 86: "Heavy snow showers", 95: "Thunderstorm", 96: "Thunderstorm with slight hail", 99: "Thunderstorm with heavy hail"
-        }
-        current = weather_data['current']
         return {
-            "temperature": current['temperature_2m'],
-            "description": weather_codes.get(current['weather_code'], "Unknown"),
-            "humidity": current['relative_humidity_2m'],
-            "wind_speed": current['wind_speed_10m'],
-            "precipitation": current['precipitation']
+            "temperature": weather_data['main']['temp'],
+            "description": weather_data['weather'][0]['description'],
+            "humidity": weather_data['main']['humidity'],
+            "wind_speed": weather_data['wind']['speed'],
+            "precipitation": weather_data.get('rain', {}).get('1h', 0)  # mm in last 1h, if available
         }
     except requests.exceptions.HTTPError as e:
         if weather_response.status_code == 429:
-            # Return a 429 error to the frontend
             raise HTTPException(status_code=429, detail="Weather API rate limit exceeded. Please try again later.")
         raise HTTPException(status_code=500, detail=f"Weather API error: {str(e)}")
     except Exception as e:
