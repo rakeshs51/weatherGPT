@@ -31,6 +31,21 @@ client = openai.OpenAI(api_key=openai_api_key
 class ChatMessage(BaseModel):
     message: str
 
+COUNTER_FILE = "counter.txt"
+API_CALL_LIMIT = 700
+
+def get_api_counter():
+    if not os.path.exists(COUNTER_FILE):
+        return 0
+    with open(COUNTER_FILE, "r") as f:
+        return int(f.read().strip() or 0)
+
+def increment_api_counter():
+    count = get_api_counter() + 1
+    with open(COUNTER_FILE, "w") as f:
+        f.write(str(count))
+    return count
+
 def get_weather(location: str) -> dict:
     """Fetch weather data from OpenWeatherMap API"""
     api_key = os.getenv("OPENWEATHERMAP_API_KEY")
@@ -97,11 +112,14 @@ def extract_location(message: str) -> str:
 
 @app.post("/chat")
 async def chat(message: ChatMessage):
+    if get_api_counter() >= API_CALL_LIMIT:
+        return {"response": "API usage limit reached. Please try again later."}
     try:
         location = extract_location(message.message)
         print(f"Extracted location: {location}")
         weather_data = get_weather(location)
         print(f"Weather data: {weather_data}")
+        increment_api_counter()  # Increment after successful weather API call
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
