@@ -44,7 +44,10 @@ def get_weather(location: str) -> dict:
         latitude = location_data['latitude']
         longitude = location_data['longitude']
         weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m"
-        weather_response = requests.get(weather_url)
+        weather_params = {
+            "timeout": 10
+        }
+        weather_response = requests.get(weather_url, params=weather_params)
         weather_response.raise_for_status()
         weather_data = weather_response.json()
         weather_codes = {
@@ -58,6 +61,11 @@ def get_weather(location: str) -> dict:
             "wind_speed": current['wind_speed_10m'],
             "precipitation": current['precipitation']
         }
+    except requests.exceptions.HTTPError as e:
+        if weather_response.status_code == 429:
+            # Return a 429 error to the frontend
+            raise HTTPException(status_code=429, detail="Weather API rate limit exceeded. Please try again later.")
+        raise HTTPException(status_code=500, detail=f"Weather API error: {str(e)}")
     except Exception as e:
         print("Error in get_weather:")
         traceback.print_exc()
